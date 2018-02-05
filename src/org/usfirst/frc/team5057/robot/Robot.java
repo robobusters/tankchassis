@@ -15,14 +15,18 @@ import edu.wpi.first.wpilibj.ADXRS450_Gyro;
 import edu.wpi.first.wpilibj.AnalogAccelerometer;
 import edu.wpi.first.wpilibj.AnalogGyro;
 import edu.wpi.first.wpilibj.AnalogInput;
+import edu.wpi.first.wpilibj.AnalogPotentiometer;
 import edu.wpi.first.wpilibj.BuiltInAccelerometer;
 import edu.wpi.first.wpilibj.CameraServer;
 import edu.wpi.first.wpilibj.IterativeRobot;
 import edu.wpi.first.wpilibj.Joystick;
+import edu.wpi.first.wpilibj.Relay;
+import edu.wpi.first.wpilibj.Servo;
 import edu.wpi.first.wpilibj.Spark;
 import edu.wpi.first.wpilibj.SpeedControllerGroup;
 import edu.wpi.first.wpilibj.Talon;
 import edu.wpi.first.wpilibj.Timer;
+import edu.wpi.first.wpilibj.XboxController;
 import edu.wpi.first.wpilibj.drive.DifferentialDrive;
 import edu.wpi.first.wpilibj.interfaces.Accelerometer;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
@@ -48,30 +52,36 @@ public class Robot extends IterativeRobot {
 	
 	//driveTrain
 	DifferentialDrive chassis;
+	int mode=1;
 	Spark leftMotor = new Spark(leftDrivePort);
 	Spark rightMotor = new Spark(rightDrivePort);
 
 	//Joystick
 	JoystickLocations porting = new JoystickLocations();
 	Joystick xbox = new Joystick(porting.joystickPort);
+	//XboxController x = new XboxController(0);
 	
 	//Gyro
 	private static final double kVoltsPerDegreePerSecond = 0.0128;
 	private ADXRS450_Gyro gyro = new ADXRS450_Gyro();
 	
 	//Accelerometer. Ignore for now
-	//Accelerometer accel = new BuiltInAccelerometer(Accelerometer.Range.k4G);
+	Accelerometer accel = new BuiltInAccelerometer(Accelerometer.Range.k4G);
 	
 	//Sonar Distance Sensor
-	private static final int kUltrasonicPort = 0;
-	private AnalogInput m_ultrasonic = new AnalogInput(kUltrasonicPort);
+	private static final int kUltrasonicPort1 = 0;
+	private AnalogInput m_ultrasonic1 = new AnalogInput(kUltrasonicPort1);
 	private static final double kValueToInches = 0.049;
 	
+	//second sonar
+	private static final int kUltrasonicPort2 = 2;
+	private AnalogInput m_ultrasonic2 = new AnalogInput(kUltrasonicPort2);
 	
 	//values When driving
 	double dampen;
 	double[] accVal = new double[3];
-	double currentDistance;
+	double currentDistance1;
+	double currentDistance2;
 	
 	//joystick axes
 	double leftY;
@@ -80,24 +90,30 @@ public class Robot extends IterativeRobot {
 	double rightX;
 	
 	//vision init. This is code we will use for the vision programming. Ignore for now
-	/*VisionThread visionT;
+	VisionThread visionT;
 	UsbCamera cam;
 	double centerX=0.0;
 	double centerX1;
 	double centerX2;
-	final Object imgLock = new Object();*/
+	final Object imgLock = new Object();
 	
-
-	/**
-	 * This function is run when the robot is first started up and should be
-	 * used for any initialization code.
-	 */
-	@Override
+	/*AnalogPotentiometer pot;
+	Servo upperServo;
+	Servo lowerServo;
+	*/
+	Relay LED;
+	
+	//int uServo = 9;
+	//int lServo = 8;
+	int rPort = 3;
+	
+	//things robot needs to do on startup
 	public void robotInit() {
 		//choose which autonomous to use
 		m_chooser.addDefault("Default Auto", kDefaultAuto);
 		m_chooser.addObject("My Auto", kCustomAuto);
 		SmartDashboard.putData("Auto choices", m_chooser);
+		
 		
 		//setup drivetrain
 		chassis = new DifferentialDrive(leftMotor, rightMotor);
@@ -108,10 +124,17 @@ public class Robot extends IterativeRobot {
 		gyro.calibrate();
 		gyro.reset();
 		
-		/*This is code we will use for the vision programming. Ignore for now
+		/*pot = new AnalogPotentiometer(0,360,30);
+		upperServo = new Servo(uServo);
+		lowerServo = new Servo(lServo);
+		*/
+		LED = new Relay(rPort);
+		
+		LED.set(Relay.Value.kForward);
+		
 		//vision code init
 		cam= CameraServer.getInstance().startAutomaticCapture(0);//create new camera instance
-		cam.setResolution(320,240);//control pixel size
+		cam.setResolution(320*2,240*2);//control pixel size
 		visionT=new VisionThread(cam, new GripPipeline(), pipeline -> {
 			if (!pipeline.filterContoursOutput().isEmpty()) {//check to see if image is there. If image:
 				Rect r1 = Imgproc.boundingRect(pipeline.filterContoursOutput().get(0));//left contour
@@ -136,15 +159,11 @@ public class Robot extends IterativeRobot {
 	        }
 			
 		});
-		visionT.start();*/
+		visionT.start();
 	}
 
 	/**
-	 * This autonomous (along with the chooser code above) shows how to select
-	 * between different autonomous modes using the dashboard. The sendable
-	 * chooser code works with the Java SmartDashboard. 
-	 * 
-	 * <p>You can add additional auto modes by adding additional comparisons to
+	 * This autonomous. You can add additional auto modes by adding additional comparisons to
 	 * the switch structure below with additional strings. If using the
 	 * SendableChooser make sure to add them to the chooser code above as well.
 	 */
@@ -156,20 +175,15 @@ public class Robot extends IterativeRobot {
 		//This is default code we use to choose an autonomous
 	}
 
-	/**
-	 * This function is called periodically during autonomous.
-	 **/
+	/**This function is called periodically during autonomous.**/
 	@Override
 	public void autonomousPeriodic() { 
 		switch (m_autoSelected) {
 			case kCustomAuto://testing autonomous
-				chassis.setSafetyEnabled(false);//allow auto to happen
-				getHeading();
-				getDistance();
-				//getAccel();
-				driveDistance();
+				autoSonar();
 				break;
 			case kDefaultAuto://nothing right now
+				SmartDashboard.putNumber("centerX", centerX);
 				break;
 			default:
 				// Put default auto code here
@@ -179,8 +193,20 @@ public class Robot extends IterativeRobot {
 		}
 	}
 	//temporary autonomous to drive with sonar
-	public void driveDistance() {
-		if(currentDistance>18) {//if the robot is more than 18 inches from the wall
+	public void autoSonar() {
+		chassis.setSafetyEnabled(false);//allow auto to happen
+		getHeading();
+		getDistance();
+		getAccel();
+			
+		if (Math.round(currentDistance1)!=Math.round(currentDistance2)) {
+		if (currentDistance1>currentDistance2) {
+			rightMotor.set(.2);
+		}else if (currentDistance1>currentDistance2) {
+			leftMotor.set(-.2);
+		}
+		}else {
+		if(currentDistance1>18) {//if the robot is more than 18 inches from the wall
 			SmartDashboard.putNumber("AutoDriveOn",0);//say robot  moving
 			leftMotor.set(-.2);//left forward .2 speed
 			rightMotor.set(.2);//right forward .2 speed
@@ -189,24 +215,22 @@ public class Robot extends IterativeRobot {
 			leftMotor.set(0);//left stop
 			rightMotor.set(0);//right stop
 		}
+		}
+		
+		SmartDashboard.putNumber("leftSpeed", leftMotor.get()*-1);
+		SmartDashboard.putNumber("rightSpeed", rightMotor.get());
 	}
-
-	/**
-	 * This function is called periodically during operator control.
-	 */
+	
+	/**This function is called periodically during operator control.*/
 	@Override
 	public void teleopPeriodic() {
 		chassis.setSafetyEnabled(true);
 		updateAxes();
-		//changeDrive();
-		driveArcade();
-		//chassis.arcadeDrive(leftX, .75*xbox.getRawAxis(porting.rXAxis));
-		//driveTank();
+		changeDrive();
+		LED.set(Relay.Value.kForward);
 	}
 	
-	/**
-	 * This function is called periodically during test mode.
-	 */
+	/**This function is called periodically during test mode**/
 	@Override
 	public void testPeriodic() {}
 	
@@ -226,7 +250,6 @@ public class Robot extends IterativeRobot {
 	
 	//This changes which kind of drive system to use. Ignore for now
 	public void changeDrive() {
-		int mode=1;
 		if(xbox.getRawButton(porting.butA))mode=1;
 		else if(xbox.getRawButton(porting.butB))mode=2;
 		else if(xbox.getRawButton(porting.butX))mode=3;
@@ -236,13 +259,13 @@ public class Robot extends IterativeRobot {
 			driveArcade();
 			break;
 		case 2://button B does just arcade
-			chassis.arcadeDrive(-leftY, leftX);
-			break;
-		case 3://button X does tank drive
-			driveTank();
+			chassis.arcadeDrive(leftX, .75*xbox.getRawAxis(porting.rXAxis));
 			getHeading();
 			getDistance();
 			getAccel();
+			break;
+		case 3://button X does tank drive
+			driveTank();
 			break;
 		default: break;
 		}
@@ -276,13 +299,16 @@ public class Robot extends IterativeRobot {
 		getAccel();//update accelrometer
 		
 		//drive
-		chassis.tankDrive(leftY*dampen, rightY*dampen);
+		chassis.tankDrive(xbox.getRawAxis(porting.rYAxis),xbox.getRawAxis(porting.lXAxis) );
 	}
 	
 	//updates the value of the sonar sensor
 	public void getDistance() {
-		this.currentDistance = m_ultrasonic.getValue()*this.kValueToInches;
-		SmartDashboard.putNumber("distance", currentDistance);
+		this.currentDistance1 = m_ultrasonic1.getValue()*this.kValueToInches;
+		SmartDashboard.putNumber("distance right", currentDistance1);
+		
+		this.currentDistance2 = m_ultrasonic2.getValue()*this.kValueToInches;
+		SmartDashboard.putNumber("distance left", currentDistance2);
 	}
 	
 	//updates the value of the gyro
@@ -293,10 +319,12 @@ public class Robot extends IterativeRobot {
 	
 	//updates the value of the accelerometer Ignore for now
 	public double[] getAccel() {
-		//accVal[0] = accel.getX()*9.81;
-	//	accVal[1] = accel.getY()*9.81;
-		//accVal[2] = accel.getZ()*9.81;
-		//SmartDashboard.putNumberArray("Acceleration m/s^2 x,y,z", accVal);
+		accVal[0] = accel.getX()*9.81;
+		accVal[1] = accel.getY()*9.81;
+		accVal[2] = accel.getZ()*9.81;
+		SmartDashboard.putNumber("x accel", accVal[0]);
+		SmartDashboard.putNumber("y accel", accVal[1]);
+		SmartDashboard.putNumber("z accel", accVal[2]);
 		return accVal;
 	}
 }
